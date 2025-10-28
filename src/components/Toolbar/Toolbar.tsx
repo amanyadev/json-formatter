@@ -10,6 +10,7 @@ import {
   Play,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { ThemeToggle } from '@/components/ThemeToggle/ThemeToggle';
 
 interface ToolbarProps {
   onFormat: () => void;
@@ -34,9 +35,10 @@ export function Toolbar({
 }: ToolbarProps) {
   return (
     <div className="flex items-center justify-between gap-4 p-4 bg-card border-b border-border">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <Code2 className="w-5 h-5 text-primary" />
         <h1 className="text-lg font-semibold">JSON Formatter</h1>
+        <ThemeToggle />
       </div>
 
       <div className="flex items-center gap-3">

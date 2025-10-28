@@ -8,6 +8,11 @@ import { formatJSON, validateJSON } from '@/utils/jsonFormatter';
 import { downloadJSON, copyToClipboard } from '@/utils/download';
 import { toast } from '@/hooks/use-toast';
 import type { FormatResult } from '@/types/formatter';
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '@/components/ui/resizable';
 
 // Example malformed inputs for demo
 const EXAMPLES = [
@@ -38,10 +43,20 @@ const EXAMPLES = [
 ];
 
 const Index = () => {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(() => {
+    return localStorage.getItem('json-input') || '';
+  });
   const [formatResult, setFormatResult] = useState<FormatResult | null>(null);
   const [autoFormat, setAutoFormat] = useState(false);
   const [isFormatting, setIsFormatting] = useState(false);
+
+  // Persist input to localStorage
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      localStorage.setItem('json-input', input);
+    }, 500);
+    return () => clearTimeout(timeoutId);
+  }, [input]);
 
   const handleFormat = useCallback(() => {
     if (!input.trim()) {
@@ -191,64 +206,72 @@ const Index = () => {
         isFormatting={isFormatting}
       />
 
-      <div className="flex-1 flex flex-col md:flex-row gap-4 p-4 overflow-hidden">
-        {/* Input Panel */}
-        <div className="flex-1 flex flex-col gap-3 min-h-0">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted-foreground">Input</h2>
-            <select
-              className="text-xs bg-secondary text-secondary-foreground rounded px-2 py-1 outline-none focus:ring-2 focus:ring-ring"
-              onChange={(e) => {
-                const example = EXAMPLES[parseInt(e.target.value)];
-                if (example) setInput(example.content);
-              }}
-              defaultValue=""
-              aria-label="Load example"
-            >
-              <option value="" disabled>
-                Load example...
-              </option>
-              {EXAMPLES.map((example, index) => (
-                <option key={index} value={index}>
-                  {example.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm">
-            <JsonEditor
-              value={input}
-              onChange={setInput}
-              onKeyDown={handleKeyDown}
-            />
-          </div>
-        </div>
-
-        {/* Output Panel */}
-        <div className="flex-1 flex flex-col gap-3 min-h-0">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted-foreground">Output</h2>
-            <StatusBadge result={formatResult} />
-          </div>
-
-          {formatResult?.repairs && formatResult.repairs.length > 0 && (
-            <RepairLog repairs={formatResult.repairs} />
-          )}
-
-          <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm">
-            {formatResult?.ok && formatResult.pretty && formatResult.parsed ? (
-              <OutputView
-                formatted={formatResult.pretty}
-                parsed={formatResult.parsed}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <p>Formatted JSON will appear here...</p>
+      <div className="flex-1 p-4 overflow-hidden">
+        <ResizablePanelGroup direction="horizontal" className="gap-4">
+          {/* Input Panel */}
+          <ResizablePanel defaultSize={50} minSize={30}>
+            <div className="flex flex-col gap-3 h-full">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-medium text-muted-foreground">Input</h2>
+                <select
+                  className="text-xs bg-secondary text-secondary-foreground rounded px-2 py-1 outline-none focus:ring-2 focus:ring-ring"
+                  onChange={(e) => {
+                    const example = EXAMPLES[parseInt(e.target.value)];
+                    if (example) setInput(example.content);
+                  }}
+                  defaultValue=""
+                  aria-label="Load example"
+                >
+                  <option value="" disabled>
+                    Load example...
+                  </option>
+                  {EXAMPLES.map((example, index) => (
+                    <option key={index} value={index}>
+                      {example.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
-          </div>
-        </div>
+              
+              <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm min-h-0">
+                <JsonEditor
+                  value={input}
+                  onChange={setInput}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          {/* Output Panel */}
+          <ResizablePanel defaultSize={50} minSize={30}>
+            <div className="flex flex-col gap-3 h-full">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-medium text-muted-foreground">Output</h2>
+                <StatusBadge result={formatResult} />
+              </div>
+
+              {formatResult?.repairs && formatResult.repairs.length > 0 && (
+                <RepairLog repairs={formatResult.repairs} />
+              )}
+
+              <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm min-h-0">
+                {formatResult?.ok && formatResult.pretty && formatResult.parsed ? (
+                  <OutputView
+                    formatted={formatResult.pretty}
+                    parsed={formatResult.parsed}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    <p>Formatted JSON will appear here...</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
       {/* Footer with keyboard shortcuts */}
