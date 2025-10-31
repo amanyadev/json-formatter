@@ -12,11 +12,11 @@ interface JsonTreeProps {
   expandAll?: boolean;
 }
 
-export function JsonTree({ data, path = '$', level = 0, searchTerm = '', expandAll = false }: JsonTreeProps) {
+export function JsonTree({ data, path = '$', level = 0, searchTerm = '', expandAll }: JsonTreeProps) {
   const [isExpanded, setIsExpanded] = useState(level < 2);
   
-  // Sync with expandAll prop changes
-  const expanded = expandAll ?? isExpanded;
+  // Use expandAll if explicitly set, otherwise use local state
+  const expanded = expandAll !== undefined ? expandAll : isExpanded;
   
   // Highlight search matches
   const highlightMatch = (text: string) => {
