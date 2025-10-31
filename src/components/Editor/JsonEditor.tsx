@@ -8,6 +8,7 @@ interface JsonEditorProps {
   placeholder?: string;
   className?: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  language?: string;
 }
 
 export function JsonEditor({
@@ -17,6 +18,7 @@ export function JsonEditor({
   placeholder = 'Paste your JSON here...',
   className,
   onKeyDown,
+  language = 'json',
 }: JsonEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [lineNumbers, setLineNumbers] = useState<number[]>([]);

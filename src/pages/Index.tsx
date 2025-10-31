@@ -4,7 +4,7 @@ import { JsonEditor } from '@/components/Editor/JsonEditor';
 import { OutputView } from '@/components/OutputView/OutputView';
 import { StatusBadge } from '@/components/Status/StatusBadge';
 import { RepairLog } from '@/components/Status/RepairLog';
-import { formatJSON, validateJSON } from '@/utils/jsonFormatter';
+import { languageFormatters, languages } from '@/utils/languageFormatters';
 import { downloadJSON, copyToClipboard } from '@/utils/download';
 import { toast } from '@/hooks/use-toast';
 import type { FormatResult } from '@/types/formatter';
@@ -46,17 +46,24 @@ const Index = () => {
   const [input, setInput] = useState(() => {
     return localStorage.getItem('json-input') || '';
   });
+  const [language, setLanguage] = useState<string>(() => {
+    return localStorage.getItem('selected-language') || 'json';
+  });
   const [formatResult, setFormatResult] = useState<FormatResult | null>(null);
   const [autoFormat, setAutoFormat] = useState(false);
   const [isFormatting, setIsFormatting] = useState(false);
 
-  // Persist input to localStorage
+  // Persist input and language to localStorage
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       localStorage.setItem('json-input', input);
     }, 500);
     return () => clearTimeout(timeoutId);
   }, [input]);
+
+  useEffect(() => {
+    localStorage.setItem('selected-language', language);
+  }, [language]);
 
   const handleFormat = useCallback(() => {
     if (!input.trim()) {
@@ -72,52 +79,54 @@ const Index = () => {
     
     // Simulate async processing for better UX
     setTimeout(() => {
-      const result = formatJSON(input);
+      const formatter = languageFormatters[language];
+      const result = formatter.format(input);
       setFormatResult(result);
       setIsFormatting(false);
 
       if (result.ok) {
         toast({
-          title: result.repairs.length > 0 ? 'JSON Recovered' : 'Valid JSON',
+          title: result.repairs.length > 0 ? `${language.toUpperCase()} Recovered` : `Valid ${language.toUpperCase()}`,
           description: result.repairs.length > 0
             ? `Applied ${result.repairs.length} repair${result.repairs.length > 1 ? 's' : ''}`
-            : 'Your JSON is valid',
+            : `Your ${language.toUpperCase()} is valid`,
         });
       } else {
         toast({
           title: 'Unable to format',
-          description: result.error || 'Invalid JSON',
+          description: result.error || `Invalid ${language.toUpperCase()}`,
           variant: 'destructive',
         });
       }
     }, 100);
-  }, [input]);
+  }, [input, language]);
 
   const handleValidate = useCallback(() => {
     if (!input.trim()) {
       toast({
         title: 'Empty input',
-        description: 'Please enter some JSON to validate',
+        description: `Please enter some ${language.toUpperCase()} to validate`,
         variant: 'destructive',
       });
       return;
     }
 
-    const validation = validateJSON(input);
+    const formatter = languageFormatters[language];
+    const validation = formatter.validate(input);
     
     if (validation.valid) {
       toast({
-        title: 'Valid JSON',
-        description: 'Your JSON is syntactically correct',
+        title: `Valid ${language.toUpperCase()}`,
+        description: `Your ${language.toUpperCase()} is syntactically correct`,
       });
     } else {
       toast({
-        title: 'Invalid JSON',
+        title: `Invalid ${language.toUpperCase()}`,
         description: validation.error,
         variant: 'destructive',
       });
     }
-  }, [input]);
+  }, [input, language]);
 
   const handleCopy = useCallback(() => {
     if (formatResult?.pretty) {
@@ -125,7 +134,7 @@ const Index = () => {
         .then(() => {
           toast({
             title: 'Copied',
-            description: 'Formatted JSON copied to clipboard',
+            description: `Formatted ${language.toUpperCase()} copied to clipboard`,
           });
         })
         .catch(() => {
@@ -138,27 +147,27 @@ const Index = () => {
     } else {
       toast({
         title: 'Nothing to copy',
-        description: 'Format the JSON first',
+        description: `Format the ${language.toUpperCase()} first`,
         variant: 'destructive',
       });
     }
-  }, [formatResult]);
+  }, [formatResult, language]);
 
   const handleDownload = useCallback(() => {
     if (formatResult?.pretty) {
-      downloadJSON(formatResult.pretty);
+      downloadJSON(formatResult.pretty, language);
       toast({
         title: 'Downloaded',
-        description: 'JSON file saved successfully',
+        description: `${language.toUpperCase()} file saved successfully`,
       });
     } else {
       toast({
         title: 'Nothing to download',
-        description: 'Format the JSON first',
+        description: `Format the ${language.toUpperCase()} first`,
         variant: 'destructive',
       });
     }
-  }, [formatResult]);
+  }, [formatResult, language]);
 
   const handleClear = useCallback(() => {
     setInput('');
@@ -185,13 +194,14 @@ const Index = () => {
   useEffect(() => {
     if (autoFormat && input.trim()) {
       const timeoutId = setTimeout(() => {
-        const result = formatJSON(input);
+        const formatter = languageFormatters[language];
+        const result = formatter.format(input);
         setFormatResult(result);
       }, 500);
 
       return () => clearTimeout(timeoutId);
     }
-  }, [input, autoFormat]);
+  }, [input, autoFormat, language]);
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -206,31 +216,47 @@ const Index = () => {
         isFormatting={isFormatting}
       />
 
-      <div className="flex-1 p-4 overflow-hidden">
-        <ResizablePanelGroup direction="horizontal" className="gap-4">
+      <div className="flex-1 p-2 sm:p-4 overflow-hidden">
+        <ResizablePanelGroup direction="horizontal" className="gap-2 sm:gap-4">
           {/* Input Panel */}
           <ResizablePanel defaultSize={50} minSize={30}>
-            <div className="flex flex-col gap-3 h-full">
-              <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 sm:gap-3 h-full">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h2 className="text-sm font-medium text-muted-foreground">Input</h2>
-                <select
-                  className="text-xs bg-secondary text-secondary-foreground rounded px-2 py-1 outline-none focus:ring-2 focus:ring-ring"
-                  onChange={(e) => {
-                    const example = EXAMPLES[parseInt(e.target.value)];
-                    if (example) setInput(example.content);
-                  }}
-                  defaultValue=""
-                  aria-label="Load example"
-                >
-                  <option value="" disabled>
-                    Load example...
-                  </option>
-                  {EXAMPLES.map((example, index) => (
-                    <option key={index} value={index}>
-                      {example.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    className="text-xs bg-secondary text-secondary-foreground rounded px-2 py-1 outline-none focus:ring-2 focus:ring-ring"
+                    aria-label="Select language"
+                  >
+                    {languages.map((lang) => (
+                      <option key={lang} value={lang}>
+                        {lang.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                  {language === 'json' && (
+                    <select
+                      className="text-xs bg-secondary text-secondary-foreground rounded px-2 py-1 outline-none focus:ring-2 focus:ring-ring"
+                      onChange={(e) => {
+                        const example = EXAMPLES[parseInt(e.target.value)];
+                        if (example) setInput(example.content);
+                      }}
+                      defaultValue=""
+                      aria-label="Load example"
+                    >
+                      <option value="" disabled>
+                        Load example...
+                      </option>
+                      {EXAMPLES.map((example, index) => (
+                        <option key={index} value={index}>
+                          {example.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               </div>
               
               <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm min-h-0">
@@ -238,6 +264,7 @@ const Index = () => {
                   value={input}
                   onChange={setInput}
                   onKeyDown={handleKeyDown}
+                  language={language}
                 />
               </div>
             </div>
@@ -247,8 +274,8 @@ const Index = () => {
 
           {/* Output Panel */}
           <ResizablePanel defaultSize={50} minSize={30}>
-            <div className="flex flex-col gap-3 h-full">
-              <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 sm:gap-3 h-full">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <h2 className="text-sm font-medium text-muted-foreground">Output</h2>
                 <StatusBadge result={formatResult} />
               </div>
@@ -258,14 +285,15 @@ const Index = () => {
               )}
 
               <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm min-h-0">
-                {formatResult?.ok && formatResult.pretty && formatResult.parsed ? (
+                {formatResult?.ok && formatResult.pretty ? (
                   <OutputView
                     formatted={formatResult.pretty}
                     parsed={formatResult.parsed}
+                    language={language}
                   />
                 ) : (
-                  <div className="flex items-center justify-center h-full text-muted-foreground">
-                    <p>Formatted JSON will appear here...</p>
+                  <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
+                    <p>Formatted {language.toUpperCase()} will appear here...</p>
                   </div>
                 )}
               </div>
@@ -275,10 +303,10 @@ const Index = () => {
       </div>
 
       {/* Footer with keyboard shortcuts and privacy info */}
-      <div className="px-4 py-3 border-t border-border bg-card/50">
-        <div className="flex items-center justify-between gap-6 flex-wrap">
+      <div className="px-2 sm:px-4 py-3 border-t border-border bg-card/50">
+        <div className="flex items-center justify-between gap-3 sm:gap-6 flex-wrap text-xs">
           {/* Privacy Message */}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-muted-foreground min-w-[200px]">
             <svg
               className="w-4 h-4 text-success"
               fill="none"
@@ -299,7 +327,7 @@ const Index = () => {
           </div>
 
           {/* Keyboard Shortcuts */}
-          <div className="flex items-center gap-6 text-xs text-muted-foreground">
+          <div className="hidden lg:flex items-center gap-4 xl:gap-6 text-muted-foreground">
             <span>
               <kbd className="px-2 py-1 bg-secondary rounded">Ctrl</kbd> +{' '}
               <kbd className="px-2 py-1 bg-secondary rounded">Enter</kbd> to format
@@ -318,7 +346,7 @@ const Index = () => {
             href="https://github.com/lovable-dev"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors"
+            className="flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors whitespace-nowrap"
           >
             <svg
               className="w-4 h-4"

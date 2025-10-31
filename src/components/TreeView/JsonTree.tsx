@@ -15,8 +15,8 @@ interface JsonTreeProps {
 export function JsonTree({ data, path = '$', level = 0, searchTerm = '', expandAll = false }: JsonTreeProps) {
   const [isExpanded, setIsExpanded] = useState(level < 2);
   
-  // Use expandAll prop when provided
-  const expanded = expandAll !== undefined ? expandAll : isExpanded;
+  // Sync with expandAll prop changes
+  const expanded = expandAll ?? isExpanded;
   
   // Highlight search matches
   const highlightMatch = (text: string) => {
@@ -77,7 +77,7 @@ export function JsonTree({ data, path = '$', level = 0, searchTerm = '', expandA
     return (
       <div className="font-mono">
         <button
-          onClick={() => setIsExpanded(!expanded)}
+          onClick={() => setIsExpanded(prev => !prev)}
           className="inline-flex items-center gap-1 hover:bg-accent/50 rounded px-1 transition-colors"
           aria-expanded={expanded}
           aria-label={`${expanded ? 'Collapse' : 'Expand'} array with ${data.length} items`}
@@ -125,7 +125,7 @@ export function JsonTree({ data, path = '$', level = 0, searchTerm = '', expandA
       <div className="font-mono">
         <div className="inline-flex items-center gap-2">
           <button
-            onClick={() => setIsExpanded(!expanded)}
+            onClick={() => setIsExpanded(prev => !prev)}
             className="inline-flex items-center gap-1 hover:bg-accent/50 rounded px-1 transition-colors"
             aria-expanded={expanded}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} object with ${entries.length} properties`}

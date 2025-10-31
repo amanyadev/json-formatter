@@ -13,9 +13,17 @@ export type FormatResult = {
   pretty?: string;
   repairs: RepairAction[];
   error?: string;
-  confidence: 'high' | 'medium' | 'low';
+  confidence?: 'high' | 'medium' | 'low';
   originalInput?: string;
 };
+
+export type Language = 'json' | 'xml' | 'yaml' | 'sql' | 'html' | 'css' | 'javascript';
+
+export interface LanguageFormatter {
+  name: string;
+  format: (input: string) => FormatResult;
+  validate: (input: string) => { valid: boolean; error?: string };
+}
 
 export type FormatterOptions = {
   indent?: number;
