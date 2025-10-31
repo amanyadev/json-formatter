@@ -3,6 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/x-icon" href="/json-formatter/favicon.ico" />
+
+    <!-- Start Single Page Apps for GitHub Pages -->
+    <script type="text/javascript">
+      // Single Page Apps for GitHub Pages
+      // MIT License
+      // https://github.com/rafgraph/spa-github-pages
+      // This script checks to see if a redirect is present in the query string,
+      // converts it back into the correct url and adds it to the
+      // browser's history using window.history.replaceState(...),
+      // which won't cause the browser to attempt to load the new url.
+      (function(l) {
+        if (l.search[1] === '/' ) {
+          var decoded = l.search.slice(1).split('&').map(function(s) {
+            return s.replace(/~and~/g, '&')
+          }).join('?');
+          window.history.replaceState(null, null,
+              l.pathname.slice(0, -1) + decoded + l.hash
+          );
+        }
+      }(window.location))
+    </script>
+    <!-- End Single Page Apps for GitHub Pages -->
     <title>JSON Formatter - Format, Validate & Recover Malformed JSON</title>
     <meta name="description" content="Modern JSON formatter with robust error recovery. Handles malformed JSON, trailing commas, single quotes, comments, and more. Format, validate, and prettify JSON instantly." />
     <meta name="keywords" content="JSON formatter, JSON validator, JSON beautifier, format JSON, validate JSON, JSON parser, JSON prettify, malformed JSON, JSON error recovery, online JSON tool, JSON viewer, JSON editor" />
@@ -44,7 +67,7 @@
       }
     }
     </script>
-    <script type="module" crossorigin src="/json-formatter/assets/index-8rA8iic_.js"></script>
+    <script type="module" crossorigin src="/json-formatter/assets/index-DjKUSejW.js"></script>
     <link rel="stylesheet" crossorigin href="/json-formatter/assets/index-DTQQiXQ3.css">
   </head>
 
