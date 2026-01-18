@@ -4,11 +4,12 @@ import { JsonEditor } from '@/components/Editor/JsonEditor';
 import { OutputView } from '@/components/OutputView/OutputView';
 import { StatusBadge } from '@/components/Status/StatusBadge';
 import { RepairLog } from '@/components/Status/RepairLog';
+import { ParsingProgress } from '@/components/Status/ParsingProgress';
 import { languageFormatters, languages, formatJSONAsync } from '@/utils/languageFormatters';
 import { downloadJSON, copyToClipboard } from '@/utils/download';
 import { toast } from '@/hooks/use-toast';
 import type { FormatResult } from '@/types/formatter';
-import { shouldUseWorker, WORKER_THRESHOLD_BYTES } from '@/utils/workerManager';
+import { shouldUseWorker, WORKER_THRESHOLD_BYTES, type ParseProgress } from '@/utils/workerManager';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -53,6 +54,8 @@ const Index = () => {
   const [formatResult, setFormatResult] = useState<FormatResult | null>(null);
   const [autoFormat, setAutoFormat] = useState(false);
   const [isFormatting, setIsFormatting] = useState(false);
+  const [parsingProgress, setParsingProgress] = useState<ParseProgress | null>(null);
+  const [fileSize, setFileSize] = useState<string | null>(null);
 
   // Persist input and language to localStorage
   useEffect(() => {
@@ -77,6 +80,8 @@ const Index = () => {
     }
 
     setIsFormatting(true);
+    setParsingProgress(null);
+    setFileSize(null);
 
     try {
       let result: FormatResult;
@@ -87,6 +92,9 @@ const Index = () => {
         const sizeMB = (byteSize / (1024 * 1024)).toFixed(2);
 
         if (shouldUseWorker(input)) {
+          // Set file size for progress display
+          setFileSize(`${sizeMB} MB`);
+
           // Show progress toast for large files
           toast({
             title: 'Processing large JSON',
@@ -97,6 +105,7 @@ const Index = () => {
         // Use async version with progress callback
         result = await formatJSONAsync(input, {
           onProgress: (progress) => {
+            setParsingProgress(progress);
             console.log(`[Worker] Step ${progress.step}/${progress.total}: ${progress.message}`);
           },
         });
@@ -130,6 +139,8 @@ const Index = () => {
       });
     } finally {
       setIsFormatting(false);
+      setParsingProgress(null);
+      setFileSize(null);
     }
   }, [input, language]);
 
@@ -226,13 +237,25 @@ const Index = () => {
   useEffect(() => {
     if (autoFormat && input.trim()) {
       const timeoutId = setTimeout(async () => {
+        setIsFormatting(true);
+        setParsingProgress(null);
+        setFileSize(null);
+
         try {
           let result: FormatResult;
 
           // Use async worker-based parsing for large JSON
           if (language === 'json') {
+            const byteSize = new TextEncoder().encode(input).length;
+            const sizeMB = (byteSize / (1024 * 1024)).toFixed(2);
+
+            if (shouldUseWorker(input)) {
+              setFileSize(`${sizeMB} MB`);
+            }
+
             result = await formatJSONAsync(input, {
               onProgress: (progress) => {
+                setParsingProgress(progress);
                 console.log(`[Auto-format] Step ${progress.step}/${progress.total}: ${progress.message}`);
               },
             });
@@ -246,6 +269,10 @@ const Index = () => {
         } catch (error) {
           console.error('Auto-format error:', error);
           // Silently fail for auto-format
+        } finally {
+          setIsFormatting(false);
+          setParsingProgress(null);
+          setFileSize(null);
         }
       }, 500);
 
@@ -336,7 +363,9 @@ const Index = () => {
               )}
 
               <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm min-h-0">
-                {formatResult?.ok && formatResult.pretty ? (
+                {isFormatting && parsingProgress ? (
+                  <ParsingProgress progress={parsingProgress} fileSize={fileSize || undefined} />
+                ) : formatResult?.ok && formatResult.pretty ? (
                   <OutputView
                     formatted={formatResult.pretty}
                     parsed={formatResult.parsed}
@@ -423,7 +452,9 @@ const Index = () => {
               )}
 
               <div className="flex-1 border border-border rounded-lg overflow-hidden bg-card shadow-sm min-h-0">
-                {formatResult?.ok && formatResult.pretty ? (
+                {isFormatting && parsingProgress ? (
+                  <ParsingProgress progress={parsingProgress} fileSize={fileSize || undefined} />
+                ) : formatResult?.ok && formatResult.pretty ? (
                   <OutputView
                     formatted={formatResult.pretty}
                     parsed={formatResult.parsed}
