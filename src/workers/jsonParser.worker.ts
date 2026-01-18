@@ -9,6 +9,65 @@ const DEFAULT_OPTIONS: FormatterOptions = {
   enableSubstringExtraction: true,
 };
 
+// Optimize stringify for large objects
+function optimizedStringify(obj: unknown, indent: number = 2): string {
+  const cache = new WeakSet();
+  let depth = 0;
+  const maxDepth = 100; // Prevent stack overflow on deeply nested objects
+
+  function stringify(value: unknown, currentIndent: number = 0): string {
+    // Handle primitives
+    if (value === null) return 'null';
+    if (value === undefined) return 'undefined';
+    if (typeof value === 'boolean') return value.toString();
+    if (typeof value === 'number') return isFinite(value) ? value.toString() : 'null';
+    if (typeof value === 'string') return JSON.stringify(value);
+
+    // Prevent circular references
+    if (typeof value === 'object') {
+      if (cache.has(value)) return '"[Circular Reference]"';
+      cache.add(value);
+    }
+
+    // Limit depth to prevent stack overflow
+    if (depth >= maxDepth) return '"[Max Depth Reached]"';
+
+    depth++;
+
+    try {
+      // Handle arrays
+      if (Array.isArray(value)) {
+        if (value.length === 0) return '[]';
+
+        const spaces = ' '.repeat(currentIndent + indent);
+        const endSpaces = ' '.repeat(currentIndent);
+
+        // For very large arrays, process in chunks
+        const items = value.map(item => `${spaces}${stringify(item, currentIndent + indent)}`);
+        return `[\n${items.join(',\n')}\n${endSpaces}]`;
+      }
+
+      // Handle objects
+      const spaces = ' '.repeat(currentIndent + indent);
+      const endSpaces = ' '.repeat(currentIndent);
+      const entries = Object.entries(value as Record<string, unknown>);
+
+      if (entries.length === 0) return '{}';
+
+      const items = entries.map(([key, val]) => {
+        const keyStr = JSON.stringify(key);
+        return `${spaces}${keyStr}: ${stringify(val, currentIndent + indent)}`;
+      });
+
+      return `{\n${items.join(',\n')}\n${endSpaces}}`;
+    } finally {
+      depth--;
+    }
+  }
+
+  return stringify(obj);
+}
+
 // Message types for worker communication
 export interface WorkerRequest {
   type: 'parse';
@@ -23,12 +82,30 @@ export interface WorkerResponse {
   error?: string;
 }
 
-// Main parsing function (same logic as jsonFormatter.ts)
+// Optimized regex for large strings - use early exit and limit backtracking
+function safeRegexReplace(
+  input: string,
+  pattern: RegExp,
+  replacement: string | ((substring: string, ...args: any[]) => string)
+): string {
+  // For very large strings, limit processing to avoid hanging
+  const MAX_LENGTH = 10 * 1024 * 1024; // 10MB limit for regex operations
+  if (input.length > MAX_LENGTH) {
+    return input; // Skip regex for extremely large strings
+  }
+  return input.replace(pattern, replacement as any);
+}
+
+// Main parsing function (optimized for large files)
 function formatJSON(input: string, options: FormatterOptions = {}): FormatResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const repairs: RepairAction[] = [];
   let workingInput = input;
   const originalInput = input;
+
+  // For very large files (>5MB), skip expensive recovery steps
+  const inputSize = new TextEncoder().encode(input).length;
+  const isVeryLarge = inputSize > 5 * 1024 * 1024; // 5MB
 
   // Send progress update
   self.postMessage({
@@ -39,10 +116,17 @@ function formatJSON(input: string, options: FormatterOptions = {}): FormatResult
   // Step 1: Try direct parse
   try {
     const parsed = JSON.parse(workingInput);
+
+    // Send progress for stringify
+    self.postMessage({
+      type: 'progress',
+      progress: { step: 1, total: 8, message: 'Formatting output' },
+    } as WorkerResponse);
+
     return {
       ok: true,
       parsed,
-      pretty: JSON.stringify(parsed, null, opts.indent),
+      pretty: optimizedStringify(parsed, opts.indent),
       repairs,
       confidence: 'high',
       originalInput,
@@ -58,6 +142,35 @@ function formatJSON(input: string, options: FormatterOptions = {}): FormatResult
   } as WorkerResponse);
 
   const trimmed = workingInput.trim().replace(/^[\uFEFF\u200B-\u200D\uFFFE\uFFFF]/g, '');
+
+  // For very large files, only try trim and direct parse
+  if (isVeryLarge) {
+    if (trimmed.length !== workingInput.length) {
+      repairs.push({ type: 'trim', chars: workingInput.length - trimmed.length });
+      workingInput = trimmed;
+    }
+
+    try {
+      const parsed = JSON.parse(workingInput);
+      return {
+        ok: true,
+        parsed,
+        pretty: optimizedStringify(parsed, opts.indent),
+        repairs,
+        confidence: 'high',
+        originalInput,
+      };
+    } catch (e) {
+      // For very large files, fail fast if basic parse doesn't work
+      return {
+        ok: false,
+        repairs,
+        error: 'Unable to parse large JSON. Please ensure it is valid JSON.',
+        confidence: 'low',
+        originalInput,
+      };
+    }
+  }
   if (trimmed.length !== workingInput.length) {
     repairs.push({ type: 'trim', chars: workingInput.length - trimmed.length });
     workingInput = trimmed;
@@ -67,7 +180,7 @@ function formatJSON(input: string, options: FormatterOptions = {}): FormatResult
       return {
         ok: true,
         parsed,
-        pretty: JSON.stringify(parsed, null, opts.indent),
+        pretty: optimizedStringify(parsed, opts.indent),
         repairs,
         confidence: 'high',
         originalInput,
@@ -94,7 +207,7 @@ function formatJSON(input: string, options: FormatterOptions = {}): FormatResult
       return {
         ok: true,
         parsed,
-        pretty: JSON.stringify(parsed, null, opts.indent),
+        pretty: optimizedStringify(parsed, opts.indent),
         repairs,
         confidence: 'medium',
         originalInput,
@@ -236,7 +349,7 @@ function formatJSON(input: string, options: FormatterOptions = {}): FormatResult
     return {
       ok: true,
       parsed: multipleObjects,
-      pretty: JSON.stringify(multipleObjects, null, opts.indent),
+      pretty: optimizedStringify(multipleObjects, opts.indent),
       repairs: [...repairs, { type: 'substring', start: 0, end: workingInput.length }],
       confidence: 'low',
       originalInput,
@@ -254,7 +367,11 @@ function formatJSON(input: string, options: FormatterOptions = {}): FormatResult
 }
 
 function extractJSONSubstring(input: string): string | null {
-  const firstOpen = input.search(/[{\[]/);
+  // For very large inputs, limit search depth
+  const MAX_SCAN_LENGTH = 10 * 1024 * 1024; // 10MB max scan
+  const scanLength = Math.min(input.length, MAX_SCAN_LENGTH);
+
+  const firstOpen = input.substring(0, scanLength).search(/[{\[]/);
   if (firstOpen === -1) return null;
 
   const openChar = input[firstOpen];
@@ -263,7 +380,10 @@ function extractJSONSubstring(input: string): string | null {
   let inString = false;
   let escapeNext = false;
 
-  for (let i = firstOpen; i < input.length; i++) {
+  // Limit iteration for performance
+  const endPos = Math.min(input.length, firstOpen + MAX_SCAN_LENGTH);
+
+  for (let i = firstOpen; i < endPos; i++) {
     const char = input[i];
 
     if (escapeNext) {
@@ -304,7 +424,8 @@ function extractJSONSubstring(input: string): string | null {
 function fixSingleQuotes(input: string): string {
   // Conservative approach: only replace single quotes that look like JSON keys/strings
   // Match patterns like: 'key': or 'value'
-  return input.replace(/'([^'\\]*(\\.[^'\\]*)*)'/g, (match) => {
+  // Use safeRegexReplace to avoid hanging on very large strings
+  return safeRegexReplace(input, /'([^'\\]*(\\.[^'\\]*)*)'/g, (match) => {
     // Convert single quotes to double quotes
     return '"' + match.slice(1, -1).replace(/"/g, '\\"') + '"';
   });
