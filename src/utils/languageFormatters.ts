@@ -1,7 +1,11 @@
-import { formatJSON, validateJSON } from './jsonFormatter';
+import { formatJSON, formatJSONAsync, validateJSON } from './jsonFormatter';
 import type { FormatResult, LanguageFormatter } from '@/types/formatter';
+import type { WorkerParseOptions } from './workerManager';
 import yaml from 'js-yaml';
 import xmlFormatter from 'xml-formatter';
+
+// Export async version for direct use
+export { formatJSONAsync };
 
 // JSON Formatter
 const jsonFormatter: LanguageFormatter = {

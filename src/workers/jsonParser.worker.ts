@@ -1,6 +1,5 @@
-import { parse as jsoncParse, printParseErrorCode } from 'jsonc-parser';
+import { parse as jsoncParse } from 'jsonc-parser';
 import type { FormatResult, RepairAction, FormatterOptions } from '@/types/formatter';
-import { shouldUseWorker, parseWithWorker, type WorkerParseOptions } from './workerManager';
 
 const DEFAULT_OPTIONS: FormatterOptions = {
   indent: 2,
@@ -10,36 +9,32 @@ const DEFAULT_OPTIONS: FormatterOptions = {
   enableSubstringExtraction: true,
 };
 
-/**
- * Async version of formatJSON that uses Web Worker for large inputs
- * @param input - JSON string to format
- * @param options - Formatter options with optional progress callback
- * @returns Promise resolving to FormatResult
- */
-export async function formatJSONAsync(
-  input: string,
-  options?: WorkerParseOptions
-): Promise<FormatResult> {
-  // For large JSON (>1MB), use Web Worker to avoid blocking UI
-  if (shouldUseWorker(input)) {
-    try {
-      return await parseWithWorker(input, options);
-    } catch (error) {
-      // Fallback to synchronous parsing if worker fails
-      console.warn('Worker parsing failed, falling back to sync:', error);
-      return formatJSON(input, options);
-    }
-  }
-
-  // For small JSON, use synchronous parsing (faster, no overhead)
-  return formatJSON(input, options);
+// Message types for worker communication
+export interface WorkerRequest {
+  type: 'parse';
+  input: string;
+  options?: FormatterOptions;
 }
 
-export function formatJSON(input: string, options: FormatterOptions = {}): FormatResult {
+export interface WorkerResponse {
+  type: 'result' | 'progress' | 'error';
+  result?: FormatResult;
+  progress?: { step: number; total: number; message: string };
+  error?: string;
+}
+
+// Main parsing function (same logic as jsonFormatter.ts)
+function formatJSON(input: string, options: FormatterOptions = {}): FormatResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const repairs: RepairAction[] = [];
   let workingInput = input;
   const originalInput = input;
+
+  // Send progress update
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 1, total: 8, message: 'Attempting direct parse' },
+  } as WorkerResponse);
 
   // Step 1: Try direct parse
   try {
@@ -57,11 +52,16 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
   }
 
   // Step 2: Trim whitespace and invisible characters
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 2, total: 8, message: 'Trimming whitespace' },
+  } as WorkerResponse);
+
   const trimmed = workingInput.trim().replace(/^[\uFEFF\u200B-\u200D\uFFFE\uFFFF]/g, '');
   if (trimmed.length !== workingInput.length) {
     repairs.push({ type: 'trim', chars: workingInput.length - trimmed.length });
     workingInput = trimmed;
-    
+
     try {
       const parsed = JSON.parse(workingInput);
       return {
@@ -78,12 +78,17 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
   }
 
   // Step 3: Remove leading garbage (logs, markers)
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 3, total: 8, message: 'Removing leading garbage' },
+  } as WorkerResponse);
+
   const jsonStartMatch = workingInput.match(/[{\[]/);
   if (jsonStartMatch && jsonStartMatch.index! > 0) {
     const charsRemoved = jsonStartMatch.index!;
     repairs.push({ type: 'removed_leading_garbage', chars: charsRemoved });
     workingInput = workingInput.substring(jsonStartMatch.index!);
-    
+
     try {
       const parsed = JSON.parse(workingInput);
       return {
@@ -100,6 +105,11 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
   }
 
   // Step 4: Extract JSON substring using bracket matching
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 4, total: 8, message: 'Extracting JSON substring' },
+  } as WorkerResponse);
+
   if (opts.enableSubstringExtraction) {
     const extracted = extractJSONSubstring(workingInput);
     if (extracted && extracted !== workingInput) {
@@ -109,7 +119,7 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
         extracted: extracted.length,
       });
       workingInput = extracted;
-      
+
       try {
         const parsed = JSON.parse(workingInput);
         return {
@@ -127,13 +137,18 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
   }
 
   // Step 5: Remove trailing commas
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 5, total: 8, message: 'Removing trailing commas' },
+  } as WorkerResponse);
+
   if (opts.enableTrailingCommaFix) {
     const commaFixed = workingInput.replace(/,(\s*[}\]])/g, '$1');
     const commaCount = (workingInput.match(/,(\s*[}\]])/g) || []).length;
     if (commaCount > 0) {
       repairs.push({ type: 'remove_trailing_commas', count: commaCount });
       workingInput = commaFixed;
-      
+
       try {
         const parsed = JSON.parse(workingInput);
         return {
@@ -151,13 +166,18 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
   }
 
   // Step 6: Fix single quotes (conservative)
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 6, total: 8, message: 'Fixing single quotes' },
+  } as WorkerResponse);
+
   if (opts.enableSingleQuoteFix) {
     const quoteFixed = fixSingleQuotes(workingInput);
     const quoteCount = countSingleQuoteReplacements(workingInput, quoteFixed);
     if (quoteCount > 0) {
       repairs.push({ type: 'single_quote_to_double', count: quoteCount });
       workingInput = quoteFixed;
-      
+
       try {
         const parsed = JSON.parse(workingInput);
         return {
@@ -175,17 +195,22 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
   }
 
   // Step 7: Try JSONC parser (handles comments and trailing commas)
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 7, total: 8, message: 'Trying JSONC parser' },
+  } as WorkerResponse);
+
   if (opts.enableCommentRemoval) {
     try {
       const errors: any[] = [];
       const parsed = jsoncParse(workingInput, errors, { allowTrailingComma: true });
-      
+
       if (errors.length === 0 && parsed !== undefined) {
         const commentCount = (workingInput.match(/\/\/.*|\/\*[\s\S]*?\*\//g) || []).length;
         if (commentCount > 0) {
           repairs.push({ type: 'removed_comments', count: commentCount });
         }
-        
+
         return {
           ok: true,
           parsed,
@@ -201,6 +226,11 @@ export function formatJSON(input: string, options: FormatterOptions = {}): Forma
   }
 
   // Step 8: Handle multiple concatenated JSON objects
+  self.postMessage({
+    type: 'progress',
+    progress: { step: 8, total: 8, message: 'Handling multiple objects' },
+  } as WorkerResponse);
+
   const multipleObjects = extractMultipleJSON(workingInput);
   if (multipleObjects.length > 1) {
     return {
@@ -297,7 +327,7 @@ function extractMultipleJSON(input: string): any[] {
 
       remaining = remaining.substring(firstOpen);
       const extracted = extractJSONSubstring(remaining);
-      
+
       if (!extracted) break;
 
       const parsed = JSON.parse(extracted);
@@ -311,11 +341,25 @@ function extractMultipleJSON(input: string): any[] {
   return objects;
 }
 
-export function validateJSON(input: string): { valid: boolean; error?: string } {
-  try {
-    JSON.parse(input);
-    return { valid: true };
-  } catch (e) {
-    return { valid: false, error: e instanceof Error ? e.message : 'Unknown error' };
+// Worker message handler
+self.addEventListener('message', (event: MessageEvent<WorkerRequest>) => {
+  const { type, input, options } = event.data;
+
+  if (type === 'parse') {
+    try {
+      const result = formatJSON(input, options);
+      self.postMessage({
+        type: 'result',
+        result,
+      } as WorkerResponse);
+    } catch (error) {
+      self.postMessage({
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      } as WorkerResponse);
+    }
   }
-}
+});
+
+// Export empty object to make this a module
+export {};

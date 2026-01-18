@@ -4,10 +4,11 @@ import { JsonEditor } from '@/components/Editor/JsonEditor';
 import { OutputView } from '@/components/OutputView/OutputView';
 import { StatusBadge } from '@/components/Status/StatusBadge';
 import { RepairLog } from '@/components/Status/RepairLog';
-import { languageFormatters, languages } from '@/utils/languageFormatters';
+import { languageFormatters, languages, formatJSONAsync } from '@/utils/languageFormatters';
 import { downloadJSON, copyToClipboard } from '@/utils/download';
 import { toast } from '@/hooks/use-toast';
 import type { FormatResult } from '@/types/formatter';
+import { shouldUseWorker, WORKER_THRESHOLD_BYTES } from '@/utils/workerManager';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -65,7 +66,7 @@ const Index = () => {
     localStorage.setItem('selected-language', language);
   }, [language]);
 
-  const handleFormat = useCallback(() => {
+  const handleFormat = useCallback(async () => {
     if (!input.trim()) {
       toast({
         title: 'Empty input',
@@ -76,13 +77,36 @@ const Index = () => {
     }
 
     setIsFormatting(true);
-    
-    // Simulate async processing for better UX
-    setTimeout(() => {
-      const formatter = languageFormatters[language];
-      const result = formatter.format(input);
+
+    try {
+      let result: FormatResult;
+
+      // Use async worker-based parsing for large JSON
+      if (language === 'json') {
+        const byteSize = new TextEncoder().encode(input).length;
+        const sizeMB = (byteSize / (1024 * 1024)).toFixed(2);
+
+        if (shouldUseWorker(input)) {
+          // Show progress toast for large files
+          toast({
+            title: 'Processing large JSON',
+            description: `Processing ${sizeMB}MB of JSON data in background...`,
+          });
+        }
+
+        // Use async version with progress callback
+        result = await formatJSONAsync(input, {
+          onProgress: (progress) => {
+            console.log(`[Worker] Step ${progress.step}/${progress.total}: ${progress.message}`);
+          },
+        });
+      } else {
+        // Use sync formatter for other languages
+        const formatter = languageFormatters[language];
+        result = formatter.format(input);
+      }
+
       setFormatResult(result);
-      setIsFormatting(false);
 
       if (result.ok) {
         toast({
@@ -98,7 +122,15 @@ const Index = () => {
           variant: 'destructive',
         });
       }
-    }, 100);
+    } catch (error) {
+      toast({
+        title: 'Formatting error',
+        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsFormatting(false);
+    }
   }, [input, language]);
 
   const handleValidate = useCallback(() => {
@@ -193,10 +225,28 @@ const Index = () => {
   // Auto-format on input change
   useEffect(() => {
     if (autoFormat && input.trim()) {
-      const timeoutId = setTimeout(() => {
-        const formatter = languageFormatters[language];
-        const result = formatter.format(input);
-        setFormatResult(result);
+      const timeoutId = setTimeout(async () => {
+        try {
+          let result: FormatResult;
+
+          // Use async worker-based parsing for large JSON
+          if (language === 'json') {
+            result = await formatJSONAsync(input, {
+              onProgress: (progress) => {
+                console.log(`[Auto-format] Step ${progress.step}/${progress.total}: ${progress.message}`);
+              },
+            });
+          } else {
+            // Use sync formatter for other languages
+            const formatter = languageFormatters[language];
+            result = formatter.format(input);
+          }
+
+          setFormatResult(result);
+        } catch (error) {
+          console.error('Auto-format error:', error);
+          // Silently fail for auto-format
+        }
       }, 500);
 
       return () => clearTimeout(timeoutId);
